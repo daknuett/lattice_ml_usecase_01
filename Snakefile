@@ -8,6 +8,10 @@ config_and_mass = list(f"{cno}_{mass}" for cno, mass in zip(config_nos, fermion_
 
 rule all:
     input: 
+        expand("spectra/fine/spectrum_hm_{config_and_mass}.npy",
+               config_and_mass=config_and_mass),
+        expand("plots/spectra/fine/spectrum_{config_and_mass}.png",
+               config_and_mass=config_and_mass),
         expand("models/ptc1h1l/{config_and_mass}_{n_mini_batches}_{learn_rate}.pt",
                config_and_mass=config_and_mass,
                n_mini_batches=[300, 1000],
@@ -36,6 +40,10 @@ rule all:
                config_and_mass=config_and_mass,
                n_mini_batches=[1000],
                learn_rate=[1e-2],
+               n_statistic=[20]),
+        expand("iterations/multigrid/{config_and_mass}_{n_basis}_{n_statistic}.npy",
+               config_and_mass=config_and_mass,
+               n_basis=[12],
                n_statistic=[20]),
         expand("multigrid_setup/multigrid_setup_{config_and_mass}_{n_basis}.pt",
                config_and_mass=config_and_mass,
@@ -82,7 +90,12 @@ rule all:
                config_and_mass=config_and_mass,
                n_basis=[12], learn_rate=[1e-3, 6e-4], n_mini_batches=[200, 2000, 3000, 6000]),
 
-
+        expand("iterations/coarse/unpreconditioned/{config_and_mass}_{n_basis}_{n_statistic}.npy",
+               config_and_mass=config_and_mass,
+               n_basis=[12], n_statistic=[20]),
+        expand("iterations/coarse/preconditioned/{config_and_mass}_{n_mini_batches}_{learn_rate}_{n_basis}_{n_statistic}.npy",
+               config_and_mass=config_and_mass,
+               n_basis=[12], learn_rate=[0.001, 0.001, 0.0006], n_mini_batches=[3000, 6000, 6000], n_statistic=[20]),
 
 rule train_ptc1h1l:
     threads: n_threads
@@ -228,3 +241,65 @@ rule plot_spectrum_prec_coarse:
         "plots/spectra/preconditioned/coarse/spectrum_coarse_lptc_{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.png"
     script:
         "scripts/plots/plot_spectrum_preconditioned_coarse.py"
+
+rule spectrum_fine_lm:
+    threads: 1
+    input:
+        "../test/assets/{config_no}.config.npy"
+    output:
+        "spectra/fine/spectrum_lm_{config_no}_{fermion_mass}.npy"
+    script:
+        "scripts/spectra/compute_spectrum_fine_lm.py"
+
+rule spectrum_fine_hm:
+    threads: 1
+    input:
+        "../test/assets/{config_no}.config.npy"
+    output:
+        "spectra/fine/spectrum_hm_{config_no}_{fermion_mass}.npy"
+    script:
+        "scripts/spectra/compute_spectrum_fine_hm.py"
+
+rule plot_spectrum_fine:
+    threads: 1
+    input:
+        "spectra/fine/spectrum_hm_{config_no}_{fermion_mass}.npy",
+        "spectra/fine/spectrum_lm_{config_no}_{fermion_mass}.npy"
+    output:
+        "plots/spectra/fine/spectrum_{config_no}_{fermion_mass}.png"
+    script:
+        "scripts/plots/plot_spectrum_fine.py"
+
+rule get_iterations_multigrid:
+    threads: 1
+    input:
+        "../test/assets/{config_no}.config.npy",
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+    output:
+        "iterations/multigrid/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
+        "iterations/multigrid/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}_mean_std.npy"
+    script:
+        "scripts/solvers/preconditioned_mg.py"
+
+rule get_iterations_coarse_unpreconditioned:
+    threads: 1
+    input:
+        "../test/assets/{config_no}.config.npy",
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+    output:
+        "iterations/coarse/unpreconditioned/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
+        "iterations/coarse/unpreconditioned/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}_mean_std.npy"
+    script:
+        "scripts/solvers/coarse/unpreconditioned.py"
+
+rule get_iterations_coarse_preconditioned:
+    threads: 1
+    input:
+        "../test/assets/{config_no}.config.npy",
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt",
+        "models/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.pt"
+    output:
+        "iterations/coarse/preconditioned/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}_{n_statistic}.npy",
+        "iterations/coarse/preconditioned/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}_{n_statistic}_mean_std.npy"
+    script:
+        "scripts/solvers/coarse/preconditioned_lptc1h1l.py"
