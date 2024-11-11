@@ -4,7 +4,7 @@ Lattice Machine Learning Usecase
 This usecase/workflow reproduces [1]_ using the pytorch implementation of several lattice
 related functions ``qcd_ml`` [2]_. 
 
-Authors: Daniel Knüttel [3]_ and Simon Pfahler.
+Authors: Daniel Knüttel [3]_ and Simon Pfahler.      
 University of Regensburg, Institute for Theoretical Physics.
 
 Funded by the Deutsche Forschungsgemeinschaft (DFG, German Research
