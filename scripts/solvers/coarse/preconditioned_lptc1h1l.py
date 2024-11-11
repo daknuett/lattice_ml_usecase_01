@@ -5,24 +5,24 @@ import qcd_ml
 from qcd_ml.qcd.dirac import dirac_wilson_clover
 from qcd_ml.util.qcd.multigrid import ZPP_Multigrid
 from qcd_ml.util.solver import GMRES
+from qcd_ml.qcd.dirac.coarsened import coarse_9point_op_NG
 
 from scipy import sparse
 import scipy
 
 U = torch.tensor(np.load(snakemake.input[0]))
-mg = ZPP_Multigrid.load(snakemake.input[1])
+state_dict = torch.load(snakemake.input[1], weights_only=True)
+
+w_coarse = coarse_9point_op_NG(state_dict["pseudo_gauge_forward"], state_dict["pseudo_gauge_backward"], state_dict["pseudo_mass"], state_dict["L_coarse"])
 
 fermion_mass = float(snakemake.wildcards.fermion_mass)
 n_basis = int(snakemake.wildcards.n_basis)
 n_statistic = int(snakemake.wildcards.n_statistic)
 
 paths = [[]] + [[(mu, 1)] for mu in range(4)] + [[(3, -1)]]
-layer = qcd_ml.nn.lptc.v_LPTC_NG(1, 1, paths, mg.L_coarse, n_basis)
+layer = qcd_ml.nn.lptc.v_LPTC_NG(1, 1, paths, w_coarse.L_coarse, n_basis)
 layer.load_state_dict(torch.load(snakemake.input[2]))
 
-w = dirac_wilson_clover(U, fermion_mass, 1)
-
-w_coarse = mg.get_coarse_operator(w)
 
 with torch.no_grad():
     src = torch.randn(2, 2, 2, 4, 12, dtype=torch.cdouble)

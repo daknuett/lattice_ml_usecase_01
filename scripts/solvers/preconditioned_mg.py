@@ -4,6 +4,7 @@ import numpy as np
 import qcd_ml
 from qcd_ml.qcd.dirac import dirac_wilson_clover
 from qcd_ml.util.qcd.multigrid import ZPP_Multigrid
+from qcd_ml.qcd.dirac.coarsened import coarse_9point_op_NG
 from qcd_ml.util.solver import GMRES
 
 from scipy import sparse
@@ -16,6 +17,10 @@ n_statistic = int(snakemake.wildcards.n_statistic)
 
 w = dirac_wilson_clover(U, fermion_mass, 1)
 
+coarse_state_dict = torch.load(snakemake.input[2], weights_only=True)
+
+w_coarse = coarse_9point_op_NG(coarse_state_dict["pseudo_gauge_forward"], coarse_state_dict["pseudo_gauge_backward"], coarse_state_dict["pseudo_mass"], coarse_state_dict["L_coarse"])
+
 class counting:
     def __init__(self, Q):
         self.Q = Q
@@ -25,7 +30,7 @@ class counting:
         return self.Q(x)
 
 class Lvl2MultigridPreconditioner:    
-    def __init__(self, q, mg, inner_solver_kwargs, smoother_kwargs):    
+    def __init__(self, q, mg, q_coarse, inner_solver_kwargs, smoother_kwargs):    
         self.q = q    
         self.mg = mg    
         self.inner_solver_kwargs = inner_solver_kwargs    
@@ -39,14 +44,15 @@ class Lvl2MultigridPreconditioner:
         return x
 
 counting_w = counting(w)
+counting_w_coarse = counting(w_coarse)
 
-mg_prec = Lvl2MultigridPreconditioner(counting_w, mg, {"eps": 5e-2, "maxiter": 50, "inner_iter": 25}, {"eps": 1e-15, "maxiter": 8, "inner_iter": 4})
+mg_prec = Lvl2MultigridPreconditioner(counting_w, mg, counting_w_coarse, {"eps": 5e-2, "maxiter": 50, "inner_iter": 25}, {"eps": 1e-15, "maxiter": 8, "inner_iter": 4})
 
 
 with torch.no_grad():
     src = torch.randn(8, 8, 8, 16, 4, 3, dtype=torch.cdouble)
 
-    iterations = np.zeros((n_statistic, 2))
+    iterations = np.zeros((n_statistic, 3))
     for i in range(n_statistic):
         counting_w.k = 0
         src = torch.randn_like(src)
@@ -55,6 +61,7 @@ with torch.no_grad():
         print(f"{i}: {info['k']}, residual: {info['res']}")
         iterations[i, 0] = info["k"]
         iterations[i, 1] = counting_w.k
+        iterations[i, 2] = counting_w_coarse.k
 
     np.save(snakemake.output[0], iterations)
     np.save(snakemake.output[1], np.array([np.mean(iterations, axis=0), np.std(iterations, axis=0)]))

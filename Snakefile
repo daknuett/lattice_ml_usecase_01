@@ -97,6 +97,10 @@ rule all:
                config_and_mass=config_and_mass,
                n_basis=[12], learn_rate=[0.001, 0.001, 0.0006], n_mini_batches=[3000, 6000, 6000], n_statistic=[20]),
 
+        expand("models/full_model/{config_and_mass}_{n_mini_batches_fine}_{learn_rate_fine}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_mini_batches}_{learn_rate}_{n_basis}.pt",
+               config_and_mass=config_and_mass,
+               n_basis=[12], learn_rate=[1e-3], n_mini_batches=[200], n_mini_batches_fine=[1000], learn_rate_fine=[1e-2], learn_rate_coarse=[1e-3], n_mini_batches_coarse=[6000]),
+
 rule train_ptc1h1l:
     threads: n_threads
     input:
@@ -179,12 +183,21 @@ rule multigrid_setup:
     script:
         "scripts/get_multigrid.py"
 
+rule get_coarse_operator:
+    threads: n_threads
+    input:
+        "../test/assets/{config_no}.config.npy",
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+    output:
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy"
+    script:
+        "scripts/get_coarse_operator.py"
 
 rule spectrum_mg:
     threads: 1 
     input: 
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy"
     output:
         "spectra/multigrid/spectrum_multigrid_{config_no}_{fermion_mass}_{n_basis}.npy"
     script:
@@ -204,7 +217,7 @@ rule train_coarse_lptc:
     threads: n_threads
     input:
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy"
     output:
         "models/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.pt",
         "cost/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.npy"
@@ -224,7 +237,7 @@ rule spectrum_prec_coarse:
     threads: 1
     input:
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt",
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy",
         "models/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.pt"
     output:
         "spectra/preconditioned/coarse/spectrum_coarse_lptc_{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.npy"
@@ -271,10 +284,11 @@ rule plot_spectrum_fine:
         "scripts/plots/plot_spectrum_fine.py"
 
 rule get_iterations_multigrid:
-    threads: 1
+    threads: n_threads
     input:
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt",
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy"
     output:
         "iterations/multigrid/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
         "iterations/multigrid/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}_mean_std.npy"
@@ -285,7 +299,7 @@ rule get_iterations_coarse_unpreconditioned:
     threads: 1
     input:
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt"
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy"
     output:
         "iterations/coarse/unpreconditioned/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
         "iterations/coarse/unpreconditioned/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}_mean_std.npy"
@@ -296,10 +310,41 @@ rule get_iterations_coarse_preconditioned:
     threads: 1
     input:
         "../test/assets/{config_no}.config.npy",
-        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt",
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy",
         "models/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}.pt"
     output:
         "iterations/coarse/preconditioned/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}_{n_statistic}.npy",
         "iterations/coarse/preconditioned/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_basis}_{n_statistic}_mean_std.npy"
     script:
         "scripts/solvers/coarse/preconditioned_lptc1h1l.py"
+
+
+rule plot_iteration_comparison:
+    threads: 1
+    input:
+        "iterations/unpreconditioned/{config_no}_{fermion_mass}_{n_statistic}.npy",
+        "iterations/preconditioned/ptc1h1l/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_statistic}.npy",
+        "iterations/preconditioned/smoother/{config_no}_{fermion_mass}_{n_mini_batches}_{learn_rate}_{n_statistic}.npy",
+        "iterations/multigrid/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
+        "iterations/coarse/unpreconditioned/{config_no}_{fermion_mass}_{n_basis}_{n_statistic}.npy",
+        "iterations/coarse/preconditioned/{config_no}_{fermion_mass}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_basis}_{n_statistic}.npy"
+    output:
+        "plots/iterations/{config_no}_{fermion_mass}_{n_statistic}.png"
+    notebook:
+        "scripts/notebooks/iteration_comparison.ipynb"
+
+rule train_full_model:
+    threads: n_threads
+    input:
+        "../test/assets/{config_no}.config.npy",
+        "multigrid_setup/multigrid_setup_{config_no}_{fermion_mass}_{n_basis}.pt",
+        "operators/coarse/coarse_operator_{config_no}_{fermion_mass}_{n_basis}.npy",
+        "models/smoother/{config_no}_{fermion_mass}_{n_mini_batches_fine}_{learn_rate_fine}.pt",
+        "models/coarse_lptc/{config_no}_{fermion_mass}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_basis}.pt"
+    output:
+        "models/full_model/{config_no}_{fermion_mass}_{n_mini_batches_fine}_{learn_rate_fine}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_mini_batches}_{learn_rate}_{n_basis}.pt",
+        "cost/full_model/{config_no}_{fermion_mass}_{n_mini_batches_fine}_{learn_rate_fine}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_mini_batches}_{learn_rate}_{n_basis}.npy"
+    log:
+        "logs/full_model/{config_no}_{fermion_mass}_{n_mini_batches_fine}_{learn_rate_fine}_{n_mini_batches_coarse}_{learn_rate_coarse}_{n_mini_batches}_{learn_rate}_{n_basis}.log"
+    script:
+        "scripts/training/full_model.py"

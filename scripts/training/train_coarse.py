@@ -5,7 +5,7 @@ import numpy as np
 import torch
 
 from qcd_ml.qcd.dirac import dirac_wilson_clover
-from qcd_ml.util.qcd.multigrid import ZPP_Multigrid
+from qcd_ml.qcd.dirac.coarsened import coarse_9point_op_NG
 
 config_no = snakemake.wildcards.config_no
 fermion_mass = float(snakemake.wildcards.fermion_mass)
@@ -18,17 +18,15 @@ n_basis = int(snakemake.wildcards.n_basis)
 
 # load gauge field
 U = torch.tensor(np.load(snakemake.input[0]))
-mg = ZPP_Multigrid.load(snakemake.input[1])
+state_dict = torch.load(snakemake.input[1], weights_only=True)
+
+coarse_w = coarse_9point_op_NG(state_dict["pseudo_gauge_forward"], state_dict["pseudo_gauge_backward"], state_dict["pseudo_mass"], state_dict["L_coarse"])
 
 paths = [[]] + [[(mu, 1)] for mu in range(4)] + [[(3, -1)]]
 
 
-# Wilson-Clover Dirac operator
-w = dirac_wilson_clover(U, fermion_mass, 1)
-w_coarse_mg = mg.get_coarse_operator(w)
-
 # create coarse LPTC layer
-layer = qcd_ml.nn.lptc.v_LPTC_NG(1, 1, paths, mg.L_coarse, n_basis)
+layer = qcd_ml.nn.lptc.v_LPTC_NG(1, 1, paths, coarse_w.L_coarse, n_basis)
 
 # initialize weights
 layer.weights.data = 0.01 * torch.randn_like(layer.weights.data, dtype=torch.cdouble)
@@ -49,7 +47,7 @@ loss = np.zeros(n_mini_batches)
 for t in range(n_mini_batches):
     src = torch.randn(*L_coarse, n_basis, dtype=torch.cdouble)
     #print("input shape", src.shape)
-    Dsrc = w_coarse_mg(src)
+    Dsrc = coarse_w(src)
     #print("output shape", Dsrc.shape)
 
     nrm = l2norm(Dsrc) ** 0.5
