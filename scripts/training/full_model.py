@@ -7,7 +7,7 @@ with open(snakemake.log[0], "w") as f:
     import datetime
     def log(*args, **kwargs):
         now = datetime.datetime.now()
-        print(now.strftime("[%Y-%m-%d %H:%M:%S]"), *args, **kwargs)
+        print(now.strftime("[%Y-%m-%d %H:%M:%S]"), *args, flush=True, **kwargs)
 
     import os
     log(os.system("uname -a"))
@@ -22,6 +22,7 @@ with open(snakemake.log[0], "w") as f:
     from qcd_ml.qcd.dirac import dirac_wilson_clover
     from qcd_ml.qcd.dirac.coarsened import coarse_9point_op_NG
     from qcd_ml.util.qcd.multigrid import ZPP_Multigrid
+    from qcd_ml.util.solver import GMRES
 
 
     def complex_mse(output, target):
@@ -68,8 +69,9 @@ with open(snakemake.log[0], "w") as f:
             v = self.l3(v)
             return v
 
-    class FullModel:
+    class FullModel(torch.nn.Module):
         def __init__(self, U, mg, smoother_paths, coarse_paths, L_coarse, n_basis):
+            super(FullModel, self).__init__()
             self.U = U
             self.mg = mg
             self.smoother_paths = smoother_paths
@@ -114,15 +116,15 @@ with open(snakemake.log[0], "w") as f:
             x, info_smoother = GMRES(self.q, torch.clone(b), torch.clone(x), **self.smoother_kwargs)    
             return x
 
-    mg_prec = Lvl2MultigridPreconditioner(counting_w, mg, counting_w_coarse, {"eps": 5e-2, "maxiter": 50, "inner_iter": 25}, {"eps": 1e-15, "maxiter": 8, "inner_iter": 4})
+    mg_prec = Lvl2MultigridPreconditioner(w, mg, coarse_w, {"eps": 5e-2, "maxiter": 50, "inner_iter": 25}, {"eps": 1e-15, "maxiter": 8, "inner_iter": 4})
 
     def Dinv(x):
         x, info = GMRES(w, x, torch.clone(x), eps=1e-5, maxiter=3000, preconditioner=mg_prec)
         log(f"{config_no} Dinv: iters: {info['k']}, residual: {info['res']}, converged: {info['converged']}")
         return x
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
-    cost_record = np.zeros((n_train, 3))
+    optimizer = torch.optim.Adam(full_model.parameters(), lr=learn_rate)
+    cost_record = np.zeros((n_mini_batches, 3))
     for t in range(n_mini_batches):
         src = torch.randn(*L, 4, 3, dtype=torch.cdouble)
 
@@ -132,15 +134,15 @@ with open(snakemake.log[0], "w") as f:
         inp = torch.stack([Dsrc / nrm])
         out = torch.stack([src / nrm])
 
-        cost1 = complex_mse(full_model.forward(inp), out)
+        cost_1 = complex_mse(full_model.forward(inp), out)
 
         src2 = torch.randn(*L, 4, 3, dtype=torch.cdouble)
         with torch.no_grad():
-            source2 = torch.randn_like(source)
+            source2 = torch.randn_like(src)
             source2 /= l2norm(source2)**0.5
             Dinvsource = Dinv(source2)
 
-        cost_2 = complex_mse(model.forward(torch.stack([source2])), torch.stack([Dinvsource]))
+        cost_2 = complex_mse(full_model.forward(torch.stack([source2])), torch.stack([Dinvsource]))
 
         cost = cost_1 + cost_2
 
@@ -155,5 +157,5 @@ with open(snakemake.log[0], "w") as f:
             log(f"t = {t}, cost = {cost_record[t,2]}")
 
 
-    torch.save(model.state_dict(), snakemake.output[0])
+    torch.save(full_model.state_dict(), snakemake.output[0])
     np.save(snakemake.output[1], cost_record)
